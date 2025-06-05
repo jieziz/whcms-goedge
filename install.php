@@ -25,20 +25,6 @@ function goedge_activate()
         // 创建数据表
         $db->createTables();
         
-        // 插入默认设置
-        $defaultSettings = array(
-            'plugin_version' => '1.0.0',
-            'auto_sync_enabled' => '1',
-            'sync_interval' => '3600', // 1小时
-            'log_retention_days' => '30',
-            'email_notifications' => '1',
-            'debug_mode' => '0'
-        );
-        
-        foreach ($defaultSettings as $key => $value) {
-            $db->setSetting($key, $value);
-        }
-        
         // 创建日志目录
         $logDir = __DIR__ . '/logs';
         if (!is_dir($logDir)) {
@@ -79,29 +65,13 @@ function goedge_upgrade($vars)
 {
     try {
         $db = new GoEdgeDatabase();
-        $currentVersion = $db->getSetting('plugin_version', '1.0.0');
-        $newVersion = '1.0.0'; // 当前版本
-        
-        if (version_compare($currentVersion, $newVersion, '<')) {
-            // 执行升级逻辑
-            
-            // 示例：添加新字段
-            if (version_compare($currentVersion, '1.0.1', '<')) {
-                // 升级到1.0.1的逻辑
-                $sql = "ALTER TABLE `mod_goedge_accounts` ADD COLUMN `last_sync` datetime DEFAULT NULL";
-                try {
-                    $db->pdo->exec($sql);
-                } catch (PDOException $e) {
-                    // 字段可能已存在，忽略错误
-                }
-            }
-            
-            // 更新版本号
-            $db->setSetting('plugin_version', $newVersion);
-        }
-        
+
+        // 简化版本不需要复杂的升级逻辑
+        // 如果需要升级，直接重新创建表即可
+        $db->createTables();
+
         return array('status' => 'success', 'description' => 'GoEdge 插件升级成功！');
-        
+
     } catch (Exception $e) {
         return array('status' => 'error', 'description' => '升级失败: ' . $e->getMessage());
     }
@@ -157,11 +127,9 @@ function goedge_uninstall()
         if (isset($_POST['delete_data']) && $_POST['delete_data'] == '1') {
             // 删除数据表
             $tables = array(
-                'mod_goedge_accounts',
-                'mod_goedge_logs',
-                'mod_goedge_settings'
+                'mod_goedge_plan_bindings'
             );
-            
+
             foreach ($tables as $table) {
                 try {
                     $db->pdo->exec("DROP TABLE IF EXISTS `{$table}`");

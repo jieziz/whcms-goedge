@@ -71,7 +71,7 @@ chmod 644 /path/to/whmcs/modules/servers/goedge/*.php
 ```
 
 ### 2. 数据库初始化
-插件会在首次使用时自动创建必要的数据表，无需手动执行安装脚本。
+插件会在首次使用时自动创建必要的数据表（仅一个核心表），无需手动执行安装脚本。
 
 ### 3. WHMCS产品和服务器配置
 1. **创建服务器**：
@@ -150,7 +150,7 @@ whmcs-goedge/
 
 ## 🗄️ 数据库结构
 
-插件采用极简数据库设计，仅创建必要的数据表：
+插件采用极简数据库设计，仅创建一个核心数据表：
 
 ### 核心数据表
 
@@ -166,24 +166,12 @@ whmcs-goedge/
 - created_at/updated_at: 时间戳
 ```
 
-### 可选数据表
-
-#### `mod_goedge_logs` - 日志记录表（可选）
-记录关键操作日志，便于故障排除
-```sql
-- id: 主键
-- service_id: 关联的服务ID（可选）
-- action: 操作类型
-- message: 日志消息
-- data: 详细数据（JSON格式）
-- created_at: 创建时间
-```
-
 **极简设计理念**:
-- **移除冗余表**: 删除了本地账户、套餐信息和设置存储表
+- **单表设计**: 仅保留一个核心业务表，最大化简化数据库
+- **移除冗余**: 删除了账户、套餐、日志和设置存储表
 - **API优先**: 通过API实时获取数据，避免数据同步问题
-- **文件日志**: 可选择使用文件日志替代数据库日志，进一步简化数据库
-- **配置统一**: 所有配置通过WHMCS产品配置管理，无需额外设置表
+- **文件日志**: 使用文件日志系统，无需数据库日志表
+- **配置统一**: 所有配置通过WHMCS产品配置和代码常量管理
 
 ## 🎨 简化设计说明
 
@@ -196,10 +184,11 @@ whmcs-goedge/
 4. **SSO单点登录**: 移除了复杂的SSO认证，改为直接链接到GoEdge官方登录页面
 5. **本地数据存储**: 移除了账户和套餐信息的本地存储表
 6. **设置管理表**: 移除了插件设置存储表，改用代码常量和WHMCS配置
+7. **数据库日志**: 移除了数据库日志表，改用纯文件日志系统
 
-### 可进一步简化的选项
-- **数据库日志**: 可选择完全使用文件日志，删除`mod_goedge_logs`表
-- **最小化数据库**: 仅保留`mod_goedge_plan_bindings`一个核心表
+### 最终简化结果
+- **单表数据库**: 仅保留`mod_goedge_plan_bindings`一个核心表
+- **文件日志**: 完全使用文件日志，无数据库日志负担
 
 ### 设计优势
 - **减少维护负担**: 无需维护复杂的管理界面和数据同步
@@ -219,13 +208,13 @@ whmcs-goedge/
 - 验证API密钥和密码是否有效
 - 确认服务器网络连接正常，能访问GoEdge API
 - 检查防火墙设置，确保允许HTTPS出站连接
-- 查看错误日志：`mod_goedge_logs` 表中的详细错误信息
+- 查看错误日志：检查文件日志 `/path/to/whmcs/modules/servers/goedge/logs/`
 
 #### 2. 账户创建失败
 **症状**: 客户购买后账户未自动创建
 **解决方案**:
 - 检查WHMCS钩子是否正常工作（`hooks.php` 文件）
-- 查看日志表 `mod_goedge_logs` 获取详细错误信息
+- 查看文件日志获取详细错误信息
 - 验证产品绑定配置：访问 `admin/plan_binding.php` 检查绑定关系
 - 确认GoEdge API权限，确保有创建用户和套餐的权限
 - 检查事务回滚日志，确认失败原因
@@ -256,32 +245,18 @@ whmcs-goedge/
 
 ### 日志查看
 
-#### 数据库日志
-```sql
--- 查看最近的错误日志
-SELECT * FROM mod_goedge_logs
-WHERE action LIKE '%error%' OR action LIKE '%异常%'
-ORDER BY created_at DESC LIMIT 20;
-
--- 查看特定服务的日志
-SELECT * FROM mod_goedge_logs
-WHERE service_id = 'YOUR_SERVICE_ID'
-ORDER BY created_at DESC;
-```
-
 #### 文件日志
 日志文件位置：`/path/to/whmcs/modules/servers/goedge/logs/`
 - `goedge_YYYY-MM-DD.log` - 按日期分割的日志文件
 - 包含详细的API调用和错误信息
+- 每行一个JSON格式的日志记录
+
+#### 日志格式示例
+```json
+{"timestamp":"2024-01-01 12:00:00","level":"INFO","service_id":"123","message":"创建账户成功","data":{"user_id":"456"},"ip":"127.0.0.1","user_agent":"Mozilla/5.0..."}
+```
 
 ### 数据库维护
-
-#### 清理旧日志
-```sql
--- 删除30天前的日志记录
-DELETE FROM mod_goedge_logs
-WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY);
-```
 
 #### 检查数据一致性
 ```sql
@@ -292,6 +267,15 @@ AND pid NOT IN (SELECT product_id FROM mod_goedge_plan_bindings);
 
 -- 检查绑定关系状态
 SELECT * FROM mod_goedge_plan_bindings WHERE status = 'disabled';
+```
+
+#### 日志文件维护
+```bash
+# 清理30天前的日志文件
+find /path/to/whmcs/modules/servers/goedge/logs/ -name "goedge_*.log" -mtime +30 -delete
+
+# 压缩旧日志文件
+gzip /path/to/whmcs/modules/servers/goedge/logs/goedge_$(date -d '7 days ago' +%Y-%m-%d).log
 ```
 
 ## 📞 技术支持
@@ -306,7 +290,7 @@ SELECT * FROM mod_goedge_plan_bindings WHERE status = 'disabled';
 - **WHMCS版本信息**: 在WHMCS管理后台查看
 - **PHP版本信息**: `php -v` 命令输出
 - **插件版本**: 当前使用的插件版本号
-- **错误日志内容**: 来自 `mod_goedge_logs` 表或日志文件
+- **错误日志内容**: 来自日志文件 `/path/to/whmcs/modules/servers/goedge/logs/`
 - **复现步骤**: 详细的操作步骤
 - **环境信息**: 服务器配置、网络环境等
 
@@ -333,14 +317,16 @@ SELECT * FROM mod_goedge_plan_bindings WHERE status = 'disabled';
 - ✅ 事务安全机制：完整的回滚保护
 - ✅ 详细日志记录：便于故障排除和监控
 - ✅ 用户识别机制：智能处理现有用户和新用户
-- ✅ 数据库结构优化：移除冗余表，通过API实时获取数据
+- ✅ 数据库结构优化：极简单表设计，仅保留核心业务表
+- ✅ 文件日志系统：移除数据库日志，改用高效文件日志
 
 ### 主要特性
 - **极简配置**: 安装后仅需配置套餐绑定关系即可使用
 - **智能用户管理**: 自动识别现有用户，避免重复创建
 - **原生体验**: 客户直接使用GoEdge官方功能，无需学习新界面
 - **企业级安全**: HMAC-SHA256签名、事务保护、操作审计
-- **运维友好**: 详细日志、故障排除工具、简化的数据库维护
+- **运维友好**: 文件日志系统、故障排除工具、最简数据库维护
+- **极简数据库**: 仅一个核心表，最低维护成本
 
 ---
 

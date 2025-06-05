@@ -184,17 +184,17 @@ class GoEdgeTransaction
     {
         switch ($action['type']) {
             case 'delete_user':
-                return $this->api->terminateAccount($action['data']['user_id']);
-                
+                return $this->api->deleteUser($action['data']['user_id']);
+
             case 'delete_user_plan':
                 return $this->api->deleteUserPlan($action['data']['user_plan_id']);
-                
+
             case 'delete_account_record':
                 return $this->db->deleteAccountByServiceId($action['data']['service_id']);
-                
+
             case 'delete_package_record':
                 return $this->db->deletePackageByServiceId($action['data']['service_id']);
-                
+
             default:
                 throw new Exception('未知的回滚操作类型: ' . $action['type']);
         }

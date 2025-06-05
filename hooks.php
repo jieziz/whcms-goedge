@@ -69,35 +69,10 @@ add_hook('AfterModuleRenew', 1, function($vars) {
     try {
         if ($vars['producttype'] == 'hostingaccount' && $vars['servertype'] == 'goedge') {
             $logger = new GoEdgeLogger();
-            $db = new GoEdgeDatabase();
-            $api = new GoEdgeAPI($vars);
-
             $logger->info("检测到GoEdge服务续费", $vars['serviceid']);
 
-            // 获取账户信息
-            $account = $db->getAccountByServiceId($vars['serviceid']);
-            if ($account) {
-                // 获取套餐信息并续费
-                $package = $db->getPackageByServiceId($vars['serviceid']);
-                if ($package) {
-                    // 计算新的到期时间
-                    $newExpiryDate = date('Y-m-d', strtotime($vars['nextduedate']));
-                    $renewData = array('expire_date' => $newExpiryDate);
-
-                    // 调用API续费套餐
-                    $packageResult = $api->renewUserPlan($package['goedge_package_id'], $renewData);
-
-                    if ($packageResult['success']) {
-                        // 更新数据库中的套餐到期时间
-                        $db->renewPackage($vars['serviceid'], $newExpiryDate);
-                        $logger->info("GoEdge套餐续费成功", $vars['serviceid'], array('new_expiry' => $newExpiryDate));
-                    } else {
-                        $logger->error("GoEdge套餐续费失败", $vars['serviceid'], $packageResult);
-                    }
-                } else {
-                    $logger->warning("未找到对应的GoEdge套餐", $vars['serviceid']);
-                }
-            }
+            // 简化版本：续费逻辑在模块的RenewAccount函数中处理
+            // 这个钩子主要用于记录和通知
         }
     } catch (Exception $e) {
         $logger = new GoEdgeLogger();
@@ -204,22 +179,16 @@ add_hook('AfterModuleChangePackage', 1, function($vars) {
 add_hook('ClientAreaPageProductDetails', 1, function($vars) {
     try {
         if ($vars['servertype'] == 'goedge') {
-            $db = new GoEdgeDatabase();
-            $account = $db->getAccountByServiceId($vars['serviceid']);
-            
-            if ($account) {
-                // 添加GoEdge账户信息到页面
-                return array(
-                    'goedge_account' => $account,
-                    'goedge_control_panel_url' => $vars['serveraccesshash'] . '/login'
-                );
-            }
+            // 简化版本：直接提供控制面板链接，不需要本地账户信息
+            return array(
+                'goedge_control_panel_url' => $vars['serveraccesshash'] . '/login'
+            );
         }
     } catch (Exception $e) {
         $logger = new GoEdgeLogger();
         $logger->error("处理客户端页面钩子异常", $vars['serviceid'], array('error' => $e->getMessage()));
     }
-    
+
     return array();
 });
 
@@ -229,23 +198,20 @@ add_hook('ClientAreaPageProductDetails', 1, function($vars) {
 add_hook('AdminAreaPage', 1, function($vars) {
     if ($vars['filename'] == 'clientsservices' && isset($_GET['id'])) {
         $serviceId = $_GET['id'];
-        
+
         try {
             // 检查是否为GoEdge服务
             $result = localAPI('GetClientsProducts', array(
                 'serviceid' => $serviceId,
                 'stats' => false
             ));
-            
-            if ($result['result'] == 'success' && 
+
+            if ($result['result'] == 'success' &&
                 isset($result['products']['product'][0]) &&
                 $result['products']['product'][0]['servertype'] == 'goedge') {
-                
-                $db = new GoEdgeDatabase();
-                $account = $db->getAccountByServiceId($serviceId);
-                
+
+                // 简化版本：只提供管理链接，不需要本地账户信息
                 return array(
-                    'goedge_account' => $account,
                     'goedge_admin_url' => 'admin/plan_binding.php'
                 );
             }
@@ -254,7 +220,7 @@ add_hook('AdminAreaPage', 1, function($vars) {
             $logger->error("处理管理员页面钩子异常", $serviceId, array('error' => $e->getMessage()));
         }
     }
-    
+
     return array();
 });
 

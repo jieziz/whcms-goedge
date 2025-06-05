@@ -67,67 +67,7 @@ class GoEdgeDatabase
     
 
     
-    /**
-     * 记录日志
-     */
-    public function addLog($serviceId, $action, $message, $data = null)
-    {
-        $sql = "INSERT INTO `mod_goedge_logs` 
-                (`service_id`, `action`, `message`, `data`, `ip_address`, `user_agent`, `created_at`) 
-                VALUES (?, ?, ?, ?, ?, ?, NOW())";
-        
-        $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute(array(
-            $serviceId,
-            $action,
-            $message,
-            $data ? json_encode($data) : null,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null
-        ));
-    }
-    
-    /**
-     * 获取日志列表
-     */
-    public function getLogs($serviceId = null, $limit = 100, $offset = 0)
-    {
-        if ($serviceId) {
-            $sql = "SELECT * FROM `mod_goedge_logs` WHERE `service_id` = ? ORDER BY `created_at` DESC LIMIT ? OFFSET ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute(array($serviceId, $limit, $offset));
-        } else {
-            $sql = "SELECT * FROM `mod_goedge_logs` ORDER BY `created_at` DESC LIMIT ? OFFSET ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute(array($limit, $offset));
-        }
-        return $stmt->fetchAll();
-    }
-    
-    /**
-     * 获取设置值
-     */
-    public function getSetting($key, $default = null)
-    {
-        $sql = "SELECT `setting_value` FROM `mod_goedge_settings` WHERE `setting_key` = ?";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute(array($key));
-        $result = $stmt->fetch();
-        return $result ? $result['setting_value'] : $default;
-    }
-    
-    /**
-     * 保存设置值
-     */
-    public function setSetting($key, $value)
-    {
-        $sql = "INSERT INTO `mod_goedge_settings` (`setting_key`, `setting_value`, `created_at`) 
-                VALUES (?, ?, NOW()) 
-                ON DUPLICATE KEY UPDATE `setting_value` = ?, `updated_at` = NOW()";
-        
-        $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute(array($key, $value, $value));
-    }
+    // 移除了日志和设置相关方法，改为纯文件日志和代码配置
     
 
 

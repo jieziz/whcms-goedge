@@ -42,18 +42,10 @@ class GoEdgeLogger
             'ip' => $_SERVER['REMOTE_ADDR'] ?? 'CLI',
             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI'
         );
-        
-        // 写入数据库
-        try {
-            $this->db->addLog($serviceId, $level, $message, $data);
-        } catch (Exception $e) {
-            // 如果数据库写入失败，至少写入文件
-            error_log("GoEdge Logger DB Error: " . $e->getMessage());
-        }
-        
-        // 写入文件日志
+
+        // 只写入文件日志
         $this->writeToFile($logEntry);
-        
+
         // 调试模式下输出到错误日志
         if ($this->debugMode) {
             error_log("GoEdge Plugin [{$level}]: {$message}" . ($data ? ' Data: ' . json_encode($data) : ''));
@@ -139,16 +131,10 @@ class GoEdgeLogger
     public function cleanOldLogs($days = 30)
     {
         try {
-            // 清理数据库中的旧日志
-            $sql = "DELETE FROM `mod_goedge_logs` WHERE `created_at` < DATE_SUB(NOW(), INTERVAL ? DAY)";
-            $stmt = $this->db->pdo->prepare($sql);
-            $deletedRows = $stmt->execute(array($days));
-            
-            $this->info("清理了 {$deletedRows} 条旧日志记录");
-            
-            // 清理日志文件（保留最近的记录）
+            // 只清理日志文件（保留最近的记录）
             $this->rotateLogFile();
-            
+            $this->info("清理了旧日志文件");
+
         } catch (Exception $e) {
             $this->error("清理旧日志失败", null, array('error' => $e->getMessage()));
         }
@@ -248,43 +234,44 @@ class GoEdgeLogger
     }
     
     /**
-     * 导出日志
+     * 导出日志（从文件读取）
      */
     public function exportLogs($serviceId = null, $startDate = null, $endDate = null, $format = 'csv')
     {
         try {
-            $whereConditions = array();
-            $params = array();
-            
-            if ($serviceId) {
-                $whereConditions[] = "service_id = ?";
-                $params[] = $serviceId;
+            $logs = array();
+            $logFiles = glob($this->logDir . '/goedge_*.log');
+
+            foreach ($logFiles as $logFile) {
+                $content = file_get_contents($logFile);
+                $lines = explode("\n", $content);
+
+                foreach ($lines as $line) {
+                    if (empty(trim($line))) continue;
+
+                    $logData = json_decode($line, true);
+                    if (!$logData) continue;
+
+                    // 应用过滤条件
+                    if ($serviceId && isset($logData['service_id']) && $logData['service_id'] != $serviceId) {
+                        continue;
+                    }
+
+                    $logs[] = $logData;
+                }
             }
-            
-            if ($startDate) {
-                $whereConditions[] = "created_at >= ?";
-                $params[] = $startDate;
-            }
-            
-            if ($endDate) {
-                $whereConditions[] = "created_at <= ?";
-                $params[] = $endDate;
-            }
-            
-            $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
-            
-            $sql = "SELECT * FROM mod_goedge_logs {$whereClause} ORDER BY created_at DESC";
-            $stmt = $this->db->pdo->prepare($sql);
-            $stmt->execute($params);
-            
-            $logs = $stmt->fetchAll();
-            
+
+            // 按时间排序
+            usort($logs, function($a, $b) {
+                return strtotime($b['timestamp']) - strtotime($a['timestamp']);
+            });
+
             if ($format === 'csv') {
                 return $this->exportToCsv($logs);
             } else {
                 return $logs;
             }
-            
+
         } catch (Exception $e) {
             $this->error("导出日志失败", $serviceId, array('error' => $e->getMessage()));
             return false;
@@ -297,28 +284,27 @@ class GoEdgeLogger
     private function exportToCsv($logs)
     {
         $output = fopen('php://temp', 'r+');
-        
+
         // 写入CSV头部
-        fputcsv($output, array('ID', 'Service ID', 'Action', 'Message', 'Data', 'IP Address', 'User Agent', 'Created At'));
-        
+        fputcsv($output, array('Timestamp', 'Level', 'Service ID', 'Message', 'Data', 'IP', 'User Agent'));
+
         // 写入数据
         foreach ($logs as $log) {
             fputcsv($output, array(
-                $log['id'],
-                $log['service_id'],
-                $log['action'],
-                $log['message'],
-                $log['data'],
-                $log['ip_address'],
-                $log['user_agent'],
-                $log['created_at']
+                $log['timestamp'] ?? '',
+                $log['level'] ?? '',
+                $log['service_id'] ?? '',
+                $log['message'] ?? '',
+                is_array($log['data']) ? json_encode($log['data']) : $log['data'],
+                $log['ip'] ?? '',
+                $log['user_agent'] ?? ''
             ));
         }
-        
+
         rewind($output);
         $csv = stream_get_contents($output);
         fclose($output);
-        
+
         return $csv;
     }
 }

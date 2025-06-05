@@ -94,19 +94,6 @@ class GoEdgeAPI
     }
 
     /**
-     * 根据用户名查找用户
-     */
-    public function findUserByUsername($username)
-    {
-        try {
-            $response = $this->makeRequest('GET', '/api/v1/users/search?username=' . urlencode($username));
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-    
-    /**
      * 创建用户账户
      */
     public function createAccount($accountData)
@@ -137,70 +124,8 @@ class GoEdgeAPI
         }
     }
     
-    /**
-     * 暂停用户账户
-     */
-    public function suspendAccount($userId)
-    {
-        try {
-            $data = array('userId' => $userId, 'isOn' => false);
-            $response = $this->makeRequest('POST', '/UserService/updateUser', $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
 
-    /**
-     * 恢复用户账户
-     */
-    public function unsuspendAccount($userId)
-    {
-        try {
-            $data = array('userId' => $userId, 'isOn' => true);
-            $response = $this->makeRequest('POST', '/UserService/updateUser', $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
 
-    /**
-     * 终止用户账户
-     */
-    public function terminateAccount($userId)
-    {
-        try {
-            $data = array('userId' => $userId);
-            $response = $this->makeRequest('POST', '/UserService/deleteUser', $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-    
-    /**
-     * 更新用户套餐
-     */
-    public function updatePackage($userId, $packageData)
-    {
-        try {
-            $data = array(
-                'plan' => array(
-                    'bandwidth_limit' => intval($packageData['bandwidth_limit']),
-                    'traffic_limit' => intval($packageData['traffic_limit']),
-                    'max_nodes' => intval($packageData['max_nodes']),
-                    'node_group' => $packageData['node_group']
-                )
-            );
-            
-            $response = $this->makeRequest('PUT', "/api/v1/users/{$userId}/plan", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-    
     /**
      * 获取用户信息
      */
@@ -224,106 +149,19 @@ class GoEdgeAPI
             return array('success' => false, 'error' => $e->getMessage());
         }
     }
-    
+
     /**
-     * 获取用户使用统计
+     * 删除用户账户（仅用于事务回滚）
      */
-    public function getUserStats($userId, $startDate = null, $endDate = null)
+    public function deleteUser($userId)
     {
         try {
-            $params = array();
-            if ($startDate) $params['start_date'] = $startDate;
-            if ($endDate) $params['end_date'] = $endDate;
-            
-            $queryString = !empty($params) ? '?' . http_build_query($params) : '';
-            $response = $this->makeRequest('GET', "/api/v1/users/{$userId}/stats{$queryString}");
+            $data = array('userId' => $userId);
+            $response = $this->makeRequest('POST', '/UserService/deleteUser', $data);
             return array('success' => true, 'data' => $response);
         } catch (Exception $e) {
             return array('success' => false, 'error' => $e->getMessage());
         }
-    }
-    
-    /**
-     * 重置用户密码
-     */
-    public function resetPassword($userId, $newPassword)
-    {
-        try {
-            $data = array('userId' => $userId, 'password' => $newPassword);
-            $response = $this->makeRequest('POST', '/UserService/updateUser', $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-    
-    /**
-     * 获取默认套餐模板
-     */
-    public function getDefaultPackageTemplate($packageType = 'cdn')
-    {
-        try {
-            // 尝试从GoEdge获取套餐计划模板
-            $response = $this->makeRequest('POST', '/PlanService/findAllEnabledPlans', array());
-
-            if (isset($response['plans'])) {
-                foreach ($response['plans'] as $plan) {
-                    if (isset($plan['type']) && $plan['type'] == $packageType) {
-                        return array('success' => true, 'data' => array(
-                            'bandwidth_limit' => $plan['bandwidthLimit']['count'] ?? 100,
-                            'traffic_limit' => $plan['trafficLimit']['count'] ?? 1000,
-                            'max_nodes' => 10,
-                            'node_group' => 'default',
-                            'features' => $this->getFeaturesByType($packageType)
-                        ));
-                    }
-                }
-            }
-        } catch (Exception $e) {
-            // API调用失败，使用内置默认配置
-        }
-
-        // 返回内置默认配置
-        $defaultTemplates = array(
-            'cdn' => array(
-                'bandwidth_limit' => 100,
-                'traffic_limit' => 1000,
-                'max_nodes' => 10,
-                'node_group' => 'default',
-                'features' => array('basic_cdn', 'cache_optimization')
-            ),
-            'security' => array(
-                'bandwidth_limit' => 200,
-                'traffic_limit' => 2000,
-                'max_nodes' => 15,
-                'node_group' => 'security',
-                'features' => array('ddos_protection', 'waf', 'ssl_certificate')
-            ),
-            'acceleration' => array(
-                'bandwidth_limit' => 500,
-                'traffic_limit' => 5000,
-                'max_nodes' => 20,
-                'node_group' => 'premium',
-                'features' => array('global_cdn', 'image_optimization', 'compression')
-            )
-        );
-
-        $template = $defaultTemplates[$packageType] ?? $defaultTemplates['cdn'];
-        return array('success' => true, 'data' => $template);
-    }
-
-    /**
-     * 根据套餐类型获取特性
-     */
-    private function getFeaturesByType($packageType)
-    {
-        $features = array(
-            'cdn' => array('basic_cdn', 'cache_optimization'),
-            'security' => array('ddos_protection', 'waf', 'ssl_certificate'),
-            'acceleration' => array('global_cdn', 'image_optimization', 'compression')
-        );
-
-        return $features[$packageType] ?? $features['cdn'];
     }
 
     /**
@@ -444,6 +282,29 @@ class GoEdgeAPI
     }
 
     /**
+     * 根据用户ID和套餐计划ID查找用户套餐
+     */
+    public function findUserPlanByPlanId($userId, $planId)
+    {
+        try {
+            $userPlansResult = $this->getUserPlans($userId);
+            if (!$userPlansResult['success']) {
+                return $userPlansResult;
+            }
+
+            foreach ($userPlansResult['data'] as $userPlan) {
+                if ($userPlan['planId'] == $planId) {
+                    return array('success' => true, 'data' => $userPlan);
+                }
+            }
+
+            return array('success' => false, 'error' => '未找到对应的用户套餐');
+        } catch (Exception $e) {
+            return array('success' => false, 'error' => $e->getMessage());
+        }
+    }
+
+    /**
      * 更新用户套餐
      */
     public function updateUserPlan($userPlanId, $updateData)
@@ -514,142 +375,6 @@ class GoEdgeAPI
             return array('success' => false, 'error' => $e->getMessage());
         }
     }
-
-    /**
-     * 更新套餐状态
-     */
-    public function updatePackageStatus($userId, $packageId, $status)
-    {
-        try {
-            $data = array('status' => $status);
-            $response = $this->makeRequest('PUT', "/api/v1/users/{$userId}/packages/{$packageId}/status", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 暂停套餐
-     */
-    public function suspendPackage($userId, $packageId)
-    {
-        return $this->updatePackageStatus($userId, $packageId, 'suspended');
-    }
-
-    /**
-     * 恢复套餐
-     */
-    public function unsuspendPackage($userId, $packageId)
-    {
-        return $this->updatePackageStatus($userId, $packageId, 'active');
-    }
-
-    /**
-     * 终止套餐
-     */
-    public function terminatePackage($userId, $packageId)
-    {
-        try {
-            $response = $this->makeRequest('DELETE', "/api/v1/users/{$userId}/packages/{$packageId}");
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 续费套餐
-     */
-    public function renewPackage($userId, $packageId, $renewData)
-    {
-        try {
-            $data = array(
-                'expire_date' => $renewData['expire_date'],
-                'payment_method' => $renewData['payment_method'] ?: 'whmcs',
-                'amount' => $renewData['amount'] ?: 0,
-                'currency' => $renewData['currency'] ?: 'USD'
-            );
-
-            $response = $this->makeRequest('POST', "/api/v1/users/{$userId}/packages/{$packageId}/renew", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 升级/降级套餐
-     */
-    public function upgradePackage($userId, $packageId, $newPackageData)
-    {
-        try {
-            $data = array(
-                'new_package_name' => $newPackageData['package_name'],
-                'bandwidth_limit' => intval($newPackageData['bandwidth_limit']),
-                'traffic_limit' => intval($newPackageData['traffic_limit']),
-                'max_nodes' => intval($newPackageData['max_nodes']),
-                'node_group' => $newPackageData['node_group'],
-                'features' => $newPackageData['features'] ?: array(),
-                'effective_date' => $newPackageData['effective_date'] ?: date('Y-m-d H:i:s')
-            );
-
-            $response = $this->makeRequest('PUT', "/api/v1/users/{$userId}/packages/{$packageId}/upgrade", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 获取套餐使用统计
-     */
-    public function getPackageStats($userId, $packageId, $startDate = null, $endDate = null)
-    {
-        try {
-            $params = array();
-            if ($startDate) $params['start_date'] = $startDate;
-            if ($endDate) $params['end_date'] = $endDate;
-
-            $queryString = !empty($params) ? '?' . http_build_query($params) : '';
-            $response = $this->makeRequest('GET', "/api/v1/users/{$userId}/packages/{$packageId}/stats{$queryString}");
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 延长账户到期时间
-     */
-    public function extendAccount($userId, $newExpiryDate)
-    {
-        try {
-            $data = array('expire_date' => $newExpiryDate);
-            $response = $this->makeRequest('PUT', "/api/v1/users/{$userId}/extend", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
-    /**
-     * 修改用户密码
-     */
-    public function changePassword($userId, $currentPassword, $newPassword)
-    {
-        try {
-            $data = array(
-                'current_password' => $currentPassword,
-                'new_password' => $newPassword
-            );
-            $response = $this->makeRequest('PUT', "/api/v1/users/{$userId}/change-password", $data);
-            return array('success' => true, 'data' => $response);
-        } catch (Exception $e) {
-            return array('success' => false, 'error' => $e->getMessage());
-        }
-    }
-
 
     /**
      * 发送HTTP请求

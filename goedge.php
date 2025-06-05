@@ -152,31 +152,7 @@ function goedge_CreateAccount($params)
                 'email' => $userEmail
             ));
 
-            // 检查是否已经在本地数据库中存在记录
-            $existingAccount = $db->getAccountByGoEdgeUserId($goedgeUserId);
-            if (!$existingAccount) {
-                // 保存现有用户信息到本地数据库
-                $accountData = array(
-                    'service_id' => $params['serviceid'],
-                    'goedge_user_id' => $goedgeUserId,
-                    'username' => $findResult['data']['username'],
-                    'email' => $userEmail,
-                    'status' => $findResult['data']['status'] ?: 'active',
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'bandwidth_limit' => 100,
-                    'traffic_limit' => 1000,
-                    'max_nodes' => 10,
-                    'node_group' => 'default'
-                );
-
-                if (!$transaction->saveAccount($accountData)) {
-                    throw new Exception('保存现有用户信息到数据库失败');
-                }
-
-                $logger->log('已保存现有GoEdge用户信息到本地数据库', $params['serviceid']);
-            } else {
-                $logger->log('GoEdge用户已存在于本地数据库', $params['serviceid'], $existingAccount);
-            }
+            // 简化版本：不需要本地数据库存储，直接使用现有用户
 
         } else {
             // 邮箱不存在，创建新用户
@@ -198,25 +174,6 @@ function goedge_CreateAccount($params)
             }
 
             $goedgeUserId = $result['data']['user_id'];
-
-            // 保存账户信息到数据库
-            $dbAccountData = array(
-                'service_id' => $params['serviceid'],
-                'goedge_user_id' => $goedgeUserId,
-                'username' => $accountData['username'],
-                'email' => $userEmail,
-                'status' => 'active',
-                'created_at' => date('Y-m-d H:i:s'),
-                'bandwidth_limit' => 100,
-                'traffic_limit' => 1000,
-                'max_nodes' => 10,
-                'node_group' => 'default'
-            );
-
-            if (!$transaction->saveAccount($dbAccountData)) {
-                throw new Exception('保存账户信息到数据库失败');
-            }
-
             $logger->log('GoEdge 新用户创建成功', $params['serviceid'], $result);
         }
 
@@ -262,29 +219,7 @@ function goedge_CreateAccount($params)
                 throw new Exception('GoEdge 套餐开通失败: ' . $result['error']);
             }
 
-            // 保存套餐信息到数据库
-            $actualPackageData = $result['data'];
-            $packageDbData = array(
-                'service_id' => $params['serviceid'],
-                'goedge_user_id' => $goedgeUserId,
-                'goedge_package_id' => $actualPackageData['package_id'],
-                'package_name' => $packageData['package_name'],
-                'package_type' => $packageData['package_type'],
-                'bandwidth_limit' => $actualPackageData['bandwidth_limit'] ?? 100,
-                'traffic_limit' => $actualPackageData['traffic_limit'] ?? 1000,
-                'max_nodes' => $actualPackageData['max_nodes'] ?? 10,
-                'node_group' => $actualPackageData['node_group'] ?? 'default',
-                'features' => $packageData['features'],
-                'status' => 'active',
-                'expire_date' => $packageData['expire_date'],
-                'auto_renew' => $packageData['auto_renew'],
-                'created_at' => date('Y-m-d H:i:s')
-            );
-
-            if (!$transaction->savePackage($packageDbData)) {
-                throw new Exception('保存套餐信息到数据库失败');
-            }
-
+            // 简化版本：不需要本地数据库存储套餐信息
             // 提交事务
             $transaction->commit();
 
@@ -320,45 +255,46 @@ function goedge_SuspendAccount($params)
         $api = new GoEdgeAPI($params);
         $db = new GoEdgeDatabase();
 
-        $logger->log('开始暂停 GoEdge 账户', $params['serviceid']);
+        $logger->log('开始暂停 GoEdge 服务', $params['serviceid']);
 
-        // 获取账户信息
-        $account = $db->getAccountByServiceId($params['serviceid']);
-        if (!$account) {
+        // 通过API查找用户
+        $userEmail = $params['clientsdetails']['email'];
+        $findResult = $api->findUserByEmail($userEmail);
+
+        if (!$findResult['success'] || !$findResult['data']) {
             return '未找到对应的 GoEdge 账户';
         }
 
-        // 获取套餐信息
-        $package = $db->getPackageByServiceId($params['serviceid']);
+        $goedgeUserId = $findResult['data']['user_id'];
 
-        // 调用 API 暂停账户
-        $result = $api->suspendAccount($account['goedge_user_id']);
+        // 获取当前产品的套餐绑定
+        $binding = $db->getPlanBinding($params['pid']);
+        if (!$binding) {
+            return '未找到产品套餐绑定配置';
+        }
+
+        // 查找用户的对应套餐
+        $userPlanResult = $api->findUserPlanByPlanId($goedgeUserId, $binding['plan_id']);
+        if (!$userPlanResult['success']) {
+            return '未找到对应的用户套餐';
+        }
+
+        $userPlanId = $userPlanResult['data']['id'];
+
+        // 暂停用户套餐（而不是整个用户账户）
+        $result = $api->suspendUserPlan($userPlanId);
 
         if ($result['success']) {
-            // 更新账户状态
-            $db->updateAccountStatus($params['serviceid'], 'suspended');
-
-            // 如果有套餐，也暂停套餐
-            if ($package) {
-                $packageResult = $api->suspendUserPlan($package['goedge_package_id']);
-                if ($packageResult['success']) {
-                    $db->updatePackageStatus($params['serviceid'], 'suspended');
-                    $logger->log('GoEdge 套餐暂停成功', $params['serviceid']);
-                } else {
-                    $logger->log('GoEdge 套餐暂停失败', $params['serviceid'], $packageResult);
-                }
-            }
-
-            $logger->log('GoEdge 账户暂停成功', $params['serviceid']);
+            $logger->log('GoEdge 服务暂停成功', $params['serviceid'], array('user_plan_id' => $userPlanId));
             return 'success';
         } else {
-            $logger->log('GoEdge 账户暂停失败', $params['serviceid'], $result);
-            return $result['error'] ?: '暂停账户时发生未知错误';
+            $logger->log('GoEdge 服务暂停失败', $params['serviceid'], $result);
+            return $result['error'] ?: '暂停服务时发生未知错误';
         }
 
     } catch (Exception $e) {
-        $logger->log('暂停账户异常', $params['serviceid'], array('error' => $e->getMessage()));
-        return '暂停账户时发生异常: ' . $e->getMessage();
+        $logger->log('暂停服务异常', $params['serviceid'], array('error' => $e->getMessage()));
+        return '暂停服务时发生异常: ' . $e->getMessage();
     }
 }
 
@@ -372,45 +308,46 @@ function goedge_UnsuspendAccount($params)
         $api = new GoEdgeAPI($params);
         $db = new GoEdgeDatabase();
 
-        $logger->log('开始恢复 GoEdge 账户', $params['serviceid']);
+        $logger->log('开始恢复 GoEdge 服务', $params['serviceid']);
 
-        // 获取账户信息
-        $account = $db->getAccountByServiceId($params['serviceid']);
-        if (!$account) {
+        // 通过API查找用户
+        $userEmail = $params['clientsdetails']['email'];
+        $findResult = $api->findUserByEmail($userEmail);
+
+        if (!$findResult['success'] || !$findResult['data']) {
             return '未找到对应的 GoEdge 账户';
         }
 
-        // 获取套餐信息
-        $package = $db->getPackageByServiceId($params['serviceid']);
+        $goedgeUserId = $findResult['data']['user_id'];
 
-        // 调用 API 恢复账户
-        $result = $api->unsuspendAccount($account['goedge_user_id']);
+        // 获取当前产品的套餐绑定
+        $binding = $db->getPlanBinding($params['pid']);
+        if (!$binding) {
+            return '未找到产品套餐绑定配置';
+        }
+
+        // 查找用户的对应套餐
+        $userPlanResult = $api->findUserPlanByPlanId($goedgeUserId, $binding['plan_id']);
+        if (!$userPlanResult['success']) {
+            return '未找到对应的用户套餐';
+        }
+
+        $userPlanId = $userPlanResult['data']['id'];
+
+        // 恢复用户套餐（而不是整个用户账户）
+        $result = $api->unsuspendUserPlan($userPlanId);
 
         if ($result['success']) {
-            // 更新账户状态
-            $db->updateAccountStatus($params['serviceid'], 'active');
-
-            // 如果有套餐，也恢复套餐
-            if ($package) {
-                $packageResult = $api->unsuspendUserPlan($package['goedge_package_id']);
-                if ($packageResult['success']) {
-                    $db->updatePackageStatus($params['serviceid'], 'active');
-                    $logger->log('GoEdge 套餐恢复成功', $params['serviceid']);
-                } else {
-                    $logger->log('GoEdge 套餐恢复失败', $params['serviceid'], $packageResult);
-                }
-            }
-
-            $logger->log('GoEdge 账户恢复成功', $params['serviceid']);
+            $logger->log('GoEdge 服务恢复成功', $params['serviceid'], array('user_plan_id' => $userPlanId));
             return 'success';
         } else {
-            $logger->log('GoEdge 账户恢复失败', $params['serviceid'], $result);
-            return $result['error'] ?: '恢复账户时发生未知错误';
+            $logger->log('GoEdge 服务恢复失败', $params['serviceid'], $result);
+            return $result['error'] ?: '恢复服务时发生未知错误';
         }
 
     } catch (Exception $e) {
-        $logger->log('恢复账户异常', $params['serviceid'], array('error' => $e->getMessage()));
-        return '恢复账户时发生异常: ' . $e->getMessage();
+        $logger->log('恢复服务异常', $params['serviceid'], array('error' => $e->getMessage()));
+        return '恢复服务时发生异常: ' . $e->getMessage();
     }
 }
 
@@ -424,45 +361,59 @@ function goedge_TerminateAccount($params)
         $api = new GoEdgeAPI($params);
         $db = new GoEdgeDatabase();
 
-        $logger->log('开始终止 GoEdge 账户', $params['serviceid']);
+        $logger->log('开始终止 GoEdge 服务', $params['serviceid']);
 
-        // 获取账户信息
-        $account = $db->getAccountByServiceId($params['serviceid']);
-        if (!$account) {
-            return '未找到对应的 GoEdge 账户';
+        // 通过API查找用户
+        $userEmail = $params['clientsdetails']['email'];
+        $findResult = $api->findUserByEmail($userEmail);
+
+        if (!$findResult['success'] || !$findResult['data']) {
+            $logger->log('未找到对应的 GoEdge 账户，可能已被删除', $params['serviceid']);
+            return 'success'; // 账户不存在视为成功
         }
 
-        // 获取套餐信息
-        $package = $db->getPackageByServiceId($params['serviceid']);
+        $goedgeUserId = $findResult['data']['user_id'];
 
-        // 先终止套餐
-        if ($package) {
-            $packageResult = $api->deleteUserPlan($package['goedge_package_id']);
-            if ($packageResult['success']) {
-                $db->updatePackageStatus($params['serviceid'], 'terminated');
-                $logger->log('GoEdge 套餐终止成功', $params['serviceid']);
-            } else {
-                $logger->log('GoEdge 套餐终止失败', $params['serviceid'], $packageResult);
-                // 继续终止账户，即使套餐终止失败
-            }
+        // 获取当前产品的套餐绑定
+        $binding = $db->getPlanBinding($params['pid']);
+        if (!$binding) {
+            $logger->log('未找到产品套餐绑定配置，跳过套餐删除', $params['serviceid']);
+            return 'success'; // 没有绑定配置视为成功
         }
 
-        // 调用 API 终止账户
-        $result = $api->terminateAccount($account['goedge_user_id']);
+        // 查找用户的对应套餐
+        $userPlanResult = $api->findUserPlanByPlanId($goedgeUserId, $binding['plan_id']);
+        if (!$userPlanResult['success']) {
+            $logger->log('未找到对应的用户套餐，可能已被删除', $params['serviceid']);
+            return 'success'; // 套餐不存在视为成功
+        }
+
+        $userPlanId = $userPlanResult['data']['id'];
+
+        // 删除用户套餐（而不是整个用户账户）
+        $result = $api->deleteUserPlan($userPlanId);
 
         if ($result['success']) {
-            // 更新账户状态
-            $db->updateAccountStatus($params['serviceid'], 'terminated');
-            $logger->log('GoEdge 账户终止成功', $params['serviceid']);
+            $logger->log('GoEdge 服务终止成功', $params['serviceid'], array('user_plan_id' => $userPlanId));
+
+            // 检查用户是否还有其他活跃套餐
+            $userPlansResult = $api->getUserPlans($goedgeUserId);
+            if ($userPlansResult['success'] && empty($userPlansResult['data'])) {
+                // 用户没有其他套餐，可以考虑删除用户账户
+                $logger->log('用户没有其他套餐，保留用户账户以备将来使用', $params['serviceid']);
+                // 注意：根据业务需求，这里可以选择是否删除用户账户
+                // 建议保留用户账户，因为用户可能会重新购买服务
+            }
+
             return 'success';
         } else {
-            $logger->log('GoEdge 账户终止失败', $params['serviceid'], $result);
-            return $result['error'] ?: '终止账户时发生未知错误';
+            $logger->log('GoEdge 服务终止失败', $params['serviceid'], $result);
+            return $result['error'] ?: '终止服务时发生未知错误';
         }
 
     } catch (Exception $e) {
-        $logger->log('终止账户异常', $params['serviceid'], array('error' => $e->getMessage()));
-        return '终止账户时发生异常: ' . $e->getMessage();
+        $logger->log('终止服务异常', $params['serviceid'], array('error' => $e->getMessage()));
+        return '终止服务时发生异常: ' . $e->getMessage();
     }
 }
 
@@ -478,77 +429,27 @@ function goedge_ChangePackage($params)
 
         $logger->log('开始更改 GoEdge 套餐', $params['serviceid']);
 
-        // 获取账户信息
-        $account = $db->getAccountByServiceId($params['serviceid']);
-        if (!$account) {
+        // 简化版本：通过API查找用户
+        $userEmail = $params['clientsdetails']['email'];
+        $findResult = $api->findUserByEmail($userEmail);
+
+        if (!$findResult['success'] || !$findResult['data']) {
             return '未找到对应的 GoEdge 账户';
         }
 
-        // 获取当前套餐信息
-        $currentPackage = $db->getPackageByServiceId($params['serviceid']);
-        if (!$currentPackage) {
-            return '未找到对应的 GoEdge 套餐';
+        $goedgeUserId = $findResult['data']['user_id'];
+
+        // 获取新的套餐绑定
+        $binding = $db->getPlanBinding($params['pid']);
+        if (!$binding) {
+            return '未找到产品套餐绑定配置';
         }
 
-        // 获取新产品信息
-        $productResult = localAPI('GetClientsProducts', array(
-            'serviceid' => $params['serviceid'],
-            'stats' => false
-        ));
-
-        $newPackageName = 'Updated Package';
-        $newPackageType = $currentPackage['package_type'];
-        $newFeatures = $currentPackage['features'] ?: array();
-
-        if ($productResult['result'] == 'success' && isset($productResult['products']['product'][0])) {
-            $product = $productResult['products']['product'][0];
-            $newPackageName = $product['name'] ?: $newPackageName;
-
-            // 根据产品名称更新套餐类型和特性
-            if (stripos($product['name'], 'security') !== false) {
-                $newPackageType = 'security';
-                $newFeatures = array('ddos_protection', 'waf', 'ssl_certificate');
-            } elseif (stripos($product['name'], 'acceleration') !== false) {
-                $newPackageType = 'acceleration';
-                $newFeatures = array('global_cdn', 'image_optimization', 'compression');
-            } else {
-                $newPackageType = 'cdn';
-                $newFeatures = array('basic_cdn', 'cache_optimization');
-            }
-        }
-
-        // 准备新的套餐数据（使用GoEdge默认配置）
-        $newPackageData = array(
-            'package_name' => $newPackageName,
-            'package_type' => $newPackageType,
-            // 移除WHMCS配置选项，让GoEdge使用对应套餐类型的默认配置
-            'features' => $newFeatures
-        );
-
-        // 调用 API 升级套餐
-        $result = $api->upgradePackage($account['goedge_user_id'], $currentPackage['goedge_package_id'], $newPackageData);
+        // 调用 API 更改套餐
+        $result = $api->changeUserPlan($goedgeUserId, $binding['plan_id']);
 
         if ($result['success']) {
-            // 更新数据库中的套餐信息（使用API返回的实际配置）
-            $actualUpgradeData = $result['data'];
-            $updateData = array_merge($newPackageData, array(
-                'bandwidth_limit' => $actualUpgradeData['bandwidth_limit'] ?? 100,
-                'traffic_limit' => $actualUpgradeData['traffic_limit'] ?? 1000,
-                'max_nodes' => $actualUpgradeData['max_nodes'] ?? 10,
-                'node_group' => $actualUpgradeData['node_group'] ?? 'default'
-            ));
-
-            $db->updatePackage($params['serviceid'], $updateData);
-
-            // 同时更新账户的基础信息
-            $db->updateAccountPackage($params['serviceid'], array(
-                'bandwidth_limit' => $actualUpgradeData['bandwidth_limit'] ?? 100,
-                'traffic_limit' => $actualUpgradeData['traffic_limit'] ?? 1000,
-                'max_nodes' => $actualUpgradeData['max_nodes'] ?? 10,
-                'node_group' => $actualUpgradeData['node_group'] ?? 'default'
-            ));
-
-            $logger->log('GoEdge 套餐更改成功', $params['serviceid'], $newPackageData);
+            $logger->log('GoEdge 套餐更改成功', $params['serviceid'], array('new_plan_id' => $binding['plan_id']));
             return 'success';
         } else {
             $logger->log('GoEdge 套餐更改失败', $params['serviceid'], $result);
