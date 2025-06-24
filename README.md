@@ -16,11 +16,12 @@
 - **智能账户创建**: 客户购买后自动在GoEdge平台创建CDN账户
 - **用户识别机制**: 如果客户邮箱已在GoEdge平台存在，直接使用现有账户购买套餐
 - **套餐自动分配**: 根据预配置的绑定关系自动分配GoEdge套餐
-- **生命周期管理**: 自动处理服务暂停、恢复、终止状态同步
+- **生命周期管理**: 专注核心业务流程，简化服务管理
 - **事务安全**: 完整的事务回滚机制，确保数据一致性
 
 ### 🔐 安全特性
-- **API安全认证**: 使用HMAC-SHA256签名确保数据传输安全
+- **AccessKey认证**: 使用GoEdge官方AccessKey/AccessToken认证机制，安全可靠
+- **动态Token**: 自动获取和刷新AccessToken，确保认证有效性
 - **直接登录**: 客户使用自己的用户名和密码直接登录GoEdge控制面板
 - **权限隔离**: 基于WHMCS的用户权限体系
 - **操作审计**: 关键操作的完整日志记录
@@ -60,7 +61,7 @@
 ### 1. 文件部署
 ```bash
 # 下载插件文件
-git clone https://github.com/your-repo/whmcs-goedge.git
+git clone https://github.com/jieziz/whcms-goedge.git
 
 # 复制到WHMCS模块目录
 cp -r whmcs-goedge/* /path/to/whmcs/modules/servers/goedge/
@@ -73,20 +74,31 @@ chmod 644 /path/to/whmcs/modules/servers/goedge/*.php
 ### 2. 数据库初始化
 插件会在首次使用时自动创建必要的数据表（仅一个核心表），无需手动执行安装脚本。
 
-### 3. WHMCS产品和服务器配置
+### 3. 创建GoEdge AccessKey
+在配置WHMCS之前，您需要在GoEdge管理平台创建API AccessKey：
+
+1. **登录GoEdge管理平台**
+2. **创建管理员AccessKey**：
+   - 进入"系统用户" → 选择用户"详情" → "API AccessKey"
+   - 点击"创建AccessKey"
+   - 记录生成的`accessKeyId`和`accessKey`
+   - **注意**: 这是管理员级别的AccessKey，具有完整的API权限
+
+### 4. WHMCS产品和服务器配置
 1. **创建服务器**：
    - 进入WHMCS管理后台 → 系统设置 → 产品/服务 → 服务器
    - 添加新服务器，类型选择 `GoEdge CDN`
-   - **服务器IP地址**：设置为GoEdge API端点（如：`https://api.goedge.cn`）
-   - **用户名**：设置为您的GoEdge API密钥
-   - **密码**：设置为您的GoEdge API密码
+   - **服务器IP地址**：设置为GoEdge API端点（如：`http://91.229.202.41:9587`）
+   - **用户名**：设置为您的GoEdge AccessKeyId
+   - **密码**：设置为您的GoEdge AccessKey
 
 2. **创建产品**：
    - 进入 产品/服务 → 产品/服务
    - 创建新产品，模块类型选择 `GoEdge CDN`
    - 分配到上面创建的服务器组
+   - **注意**: 用户名字段填入AccessKeyId，密码字段填入AccessKey
 
-### 4. 套餐绑定配置
+### 5. 套餐绑定配置
 1. 访问 `admin/plan_binding.php` 配置页面
 2. 查看API配置状态（从WHMCS产品配置中自动读取）
 3. 选择WHMCS产品，系统自动加载对应的GoEdge套餐列表
@@ -132,14 +144,16 @@ chmod 644 /path/to/whmcs/modules/servers/goedge/*.php
 
 ```
 whmcs-goedge/
-├── admin/
-│   └── plan_binding.php          # 套餐绑定配置页面
 ├── lib/
-│   ├── GoEdgeAPI.php            # GoEdge API接口类
-│   ├── GoEdgeDatabase.php       # 数据库操作类
-│   ├── GoEdgeLogger.php         # 日志记录类
-│   └── GoEdgeTransaction.php    # 事务处理类
-├── docs/                        # 文档目录
+│   ├── GoEdgeAPI.php            # GoEdge API接口类（已优化，移除无用代码）
+│   ├── GoEdgeDatabase.php       # 数据库操作类（极简设计）
+│   ├── GoEdgeLogger.php         # 日志记录类（文件日志）
+│   ├── GoEdgeTransaction.php    # 事务处理类（回滚保护）
+│   └── GoEdgeUserHelper.php     # 用户辅助类
+├── admin_panel.php              # 安全管理面板（WHMCS管理员验证）
+├── test_createuser_api.php      # 用户创建API测试脚本
+├── test_userplanservice_api.php # 用户套餐API测试脚本
+├── test_index.php               # 测试中心入口
 ├── clientarea.php               # 客户端控制面板页面
 ├── goedge.php                   # 主插件文件
 ├── hooks.php                    # WHMCS钩子函数
@@ -166,36 +180,38 @@ whmcs-goedge/
 - created_at/updated_at: 时间戳
 ```
 
-**极简设计理念**:
-- **单表设计**: 仅保留一个核心业务表，最大化简化数据库
-- **移除冗余**: 删除了账户、套餐、日志和设置存储表
-- **API优先**: 通过API实时获取数据，避免数据同步问题
-- **文件日志**: 使用文件日志系统，无需数据库日志表
-- **配置统一**: 所有配置通过WHMCS产品配置和代码常量管理
+## 🧪 API测试工具
 
-## 🎨 简化设计说明
+插件提供了专门的API测试脚本，帮助开发者和管理员验证API调用是否正常工作：
 
-### 已移除的功能
-为了保持插件的简洁性和专注性，以下功能已被移除：
+### UserService API测试
+```bash
+php test_userservice_api.php
+```
+测试功能包括：
+- API连接测试
+- 用户查找（findUserByEmail）
+- 用户创建（createAccount）
+- 用户信息获取（getUserInfo）
+- 用户删除（deleteUser）
 
-1. **账户管理页面**: 移除了管理员查看和管理GoEdge账户的页面
-2. **管理仪表板**: 移除了统计数据展示的管理仪表板
-3. **客户端账户信息显示**: 客户端页面不再显示账户详细信息（用户名、邮箱、状态等）
-4. **SSO单点登录**: 移除了复杂的SSO认证，改为直接链接到GoEdge官方登录页面
-5. **本地数据存储**: 移除了账户和套餐信息的本地存储表
-6. **设置管理表**: 移除了插件设置存储表，改用代码常量和WHMCS配置
-7. **数据库日志**: 移除了数据库日志表，改用纯文件日志系统
+### UserPlanService API测试
+```bash
+php test_userplanservice_api.php
+```
+测试功能包括：
+- 获取可用套餐计划
+- 创建用户套餐（createPackageForUser）
+- 获取用户套餐列表（getUserPlans）
+- 获取单个用户套餐信息（getUserPlanInfo）
+- 更新用户套餐（updateUserPlan）
+- 续费用户套餐
 
-### 最终简化结果
-- **单表数据库**: 仅保留`mod_goedge_plan_bindings`一个核心表
-- **文件日志**: 完全使用文件日志，无数据库日志负担
-
-### 设计优势
-- **减少维护负担**: 无需维护复杂的管理界面和数据同步
-- **提高稳定性**: 减少了潜在的故障点和数据不一致问题
-- **更好的用户体验**: 客户直接使用GoEdge官方界面，功能更完整
-- **简化配置**: 管理员只需关注核心的套餐绑定配置
-- **极简数据库**: 最少的数据表，最低的维护成本
+### 使用测试脚本
+1. 修改测试脚本中的API配置信息
+2. 设置测试用户邮箱
+3. 运行测试脚本查看结果
+4. 根据测试结果调试API配置
 
 ## 🔧 故障排除
 
@@ -204,8 +220,9 @@ whmcs-goedge/
 #### 1. API连接失败
 **症状**: 套餐绑定页面提示API连接失败
 **解决方案**:
-- 检查API端点URL是否正确（默认：https://api.goedge.cn）
-- 验证API密钥和密码是否有效
+- 检查API端点URL是否正确（如：http://91.229.202.41:9587）
+- 验证AccessKeyId和AccessKey是否有效
+- 确认AccessKey具有管理员权限（type: admin）
 - 确认服务器网络连接正常，能访问GoEdge API
 - 检查防火墙设置，确保允许HTTPS出站连接
 - 查看错误日志：检查文件日志 `/path/to/whmcs/modules/servers/goedge/logs/`
@@ -215,7 +232,7 @@ whmcs-goedge/
 **解决方案**:
 - 检查WHMCS钩子是否正常工作（`hooks.php` 文件）
 - 查看文件日志获取详细错误信息
-- 验证产品绑定配置：访问 `admin/plan_binding.php` 检查绑定关系
+- 验证产品绑定配置：访问 `admin_panel.php` 检查绑定关系
 - 确认GoEdge API权限，确保有创建用户和套餐的权限
 - 检查事务回滚日志，确认失败原因
 
@@ -278,53 +295,18 @@ find /path/to/whmcs/modules/servers/goedge/logs/ -name "goedge_*.log" -mtime +30
 gzip /path/to/whmcs/modules/servers/goedge/logs/goedge_$(date -d '7 days ago' +%Y-%m-%d).log
 ```
 
-## 📞 技术支持
-
-### 联系方式
-- **邮箱**: support@example.com
-- **文档**: https://docs.example.com/goedge-plugin
-- **GitHub**: https://github.com/your-repo/whmcs-goedge
-
-### 报告问题
-提交问题时请包含：
-- **WHMCS版本信息**: 在WHMCS管理后台查看
-- **PHP版本信息**: `php -v` 命令输出
-- **插件版本**: 当前使用的插件版本号
-- **错误日志内容**: 来自日志文件 `/path/to/whmcs/modules/servers/goedge/logs/`
-- **复现步骤**: 详细的操作步骤
-- **环境信息**: 服务器配置、网络环境等
-
 ### 调试模式
 启用调试模式以获取更详细的日志信息：
 1. 在WHMCS产品配置中启用"调试模式"
 2. 查看详细的API调用日志
 3. 分析错误原因和解决方案
 
-## 📄 许可证
-
-本插件采用 MIT 许可证，详见 [LICENSE](LICENSE) 文件。
-
-## 📋 更新日志
-
-### v1.0.0 (2024-01-01)
-- ✅ 初始版本发布
-- ✅ 核心自动化功能：账户创建、套餐分配、生命周期管理
-- ✅ 套餐绑定配置：WHMCS产品与GoEdge套餐计划绑定
-- ✅ 简化客户端界面：仅保留"进入控制面板"按钮
-- ✅ 直接登录支持：客户使用GoEdge官方控制面板
-- ✅ 统一API配置：使用WHMCS产品配置管理API参数
-- ✅ 简化管理界面：专注核心配置任务
-- ✅ 事务安全机制：完整的回滚保护
-- ✅ 详细日志记录：便于故障排除和监控
-- ✅ 用户识别机制：智能处理现有用户和新用户
-- ✅ 数据库结构优化：极简单表设计，仅保留核心业务表
-- ✅ 文件日志系统：移除数据库日志，改用高效文件日志
 
 ### 主要特性
 - **极简配置**: 安装后仅需配置套餐绑定关系即可使用
 - **智能用户管理**: 自动识别现有用户，避免重复创建
 - **原生体验**: 客户直接使用GoEdge官方功能，无需学习新界面
-- **企业级安全**: HMAC-SHA256签名、事务保护、操作审计
+- **企业级安全**: Token认证、事务保护、操作审计
 - **运维友好**: 文件日志系统、故障排除工具、最简数据库维护
 - **极简数据库**: 仅一个核心表，最低维护成本
 

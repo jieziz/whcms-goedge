@@ -80,72 +80,7 @@ add_hook('AfterModuleRenew', 1, function($vars) {
     }
 });
 
-/**
- * 服务暂停时自动暂停GoEdge账户
- */
-add_hook('AfterModuleSuspend', 1, function($vars) {
-    try {
-        if ($vars['producttype'] == 'hostingaccount' && $vars['servertype'] == 'goedge') {
-            $logger = new GoEdgeLogger();
-            $logger->info("检测到GoEdge服务暂停", $vars['serviceid']);
-            
-            // 这里实际的暂停操作已经在模块的SuspendAccount函数中处理
-            // 这个钩子主要用于记录和通知
-            
-            // 发送暂停通知邮件给客户
-            sendMessage('GoEdge Service Suspended', $vars['userid'], array(
-                'service_id' => $vars['serviceid'],
-                'domain' => $vars['domain'],
-                'suspend_reason' => $vars['suspendreason'] ?: '账户暂停'
-            ));
-        }
-    } catch (Exception $e) {
-        $logger = new GoEdgeLogger();
-        $logger->error("处理服务暂停钩子异常", $vars['serviceid'], array('error' => $e->getMessage()));
-    }
-});
-
-/**
- * 服务恢复时自动恢复GoEdge账户
- */
-add_hook('AfterModuleUnsuspend', 1, function($vars) {
-    try {
-        if ($vars['producttype'] == 'hostingaccount' && $vars['servertype'] == 'goedge') {
-            $logger = new GoEdgeLogger();
-            $logger->info("检测到GoEdge服务恢复", $vars['serviceid']);
-            
-            // 发送恢复通知邮件给客户
-            sendMessage('GoEdge Service Unsuspended', $vars['userid'], array(
-                'service_id' => $vars['serviceid'],
-                'domain' => $vars['domain']
-            ));
-        }
-    } catch (Exception $e) {
-        $logger = new GoEdgeLogger();
-        $logger->error("处理服务恢复钩子异常", $vars['serviceid'], array('error' => $e->getMessage()));
-    }
-});
-
-/**
- * 服务终止时删除GoEdge账户
- */
-add_hook('AfterModuleTerminate', 1, function($vars) {
-    try {
-        if ($vars['producttype'] == 'hostingaccount' && $vars['servertype'] == 'goedge') {
-            $logger = new GoEdgeLogger();
-            $logger->info("检测到GoEdge服务终止", $vars['serviceid']);
-            
-            // 发送终止通知邮件给客户
-            sendMessage('GoEdge Service Terminated', $vars['userid'], array(
-                'service_id' => $vars['serviceid'],
-                'domain' => $vars['domain']
-            ));
-        }
-    } catch (Exception $e) {
-        $logger = new GoEdgeLogger();
-        $logger->error("处理服务终止钩子异常", $vars['serviceid'], array('error' => $e->getMessage()));
-    }
-});
+// 简化版本：移除暂停/恢复/终止相关的钩子，专注核心业务流程
 
 /**
  * 套餐升级/降级处理
@@ -212,7 +147,7 @@ add_hook('AdminAreaPage', 1, function($vars) {
 
                 // 简化版本：只提供管理链接，不需要本地账户信息
                 return array(
-                    'goedge_admin_url' => 'admin/plan_binding.php'
+                    'goedge_admin_url' => 'admin_panel.php'
                 );
             }
         } catch (Exception $e) {
