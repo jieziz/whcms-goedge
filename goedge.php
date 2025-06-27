@@ -47,6 +47,47 @@ function goedge_MetaData()
 }
 
 /**
+ * 获取第一个可用的GoEdge服务器配置（直接从数据库获取）
+ */
+function getFirstGoEdgeServerConfig()
+{
+    try {
+        global $CONFIG, $db_host, $db_name, $db_username, $db_password;
+
+        // 获取数据库连接信息
+        $host = $db_host ?? $CONFIG['db_host'] ?? 'localhost';
+        $database = $db_name ?? $CONFIG['db_name'] ?? '';
+        $username = $db_username ?? $CONFIG['db_username'] ?? '';
+        $password = $db_password ?? $CONFIG['db_password'] ?? '';
+
+        $dsn = "mysql:host=$host;dbname=$database;charset=utf8mb4";
+        $pdo = new PDO($dsn, $username, $password, array(
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ));
+
+        // 查询第一个可用的GoEdge服务器配置
+        $stmt = $pdo->prepare("SELECT * FROM tblservers WHERE type = 'goedge' AND disabled = 0 LIMIT 1");
+        $stmt->execute();
+        $server = $stmt->fetch();
+
+        if ($server) {
+            return array(
+                'id' => $server['id'],
+                'name' => $server['name'],
+                'endpoint' => $server['ipaddress'],
+                'username' => $server['username'],
+                'password' => $server['password']
+            );
+        }
+
+        return null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/**
  * 插件配置字段 - 支持GoEdge planid绑定
  */
 function goedge_ConfigOptions()
@@ -54,61 +95,57 @@ function goedge_ConfigOptions()
     // 获取可用的GoEdge套餐计划
     $availablePlans = array();
     try {
-        // 尝试从GoEdge API获取可用套餐计划
-        $tempParams = array(
-            'serveraccesshash' => 'https://api.goedge.cn',
-            'serverusername' => '',
-            'serverpassword' => ''
-        );
-        $api = new GoEdgeAPI($tempParams);
-        $plansResult = $api->getAvailablePlans();
-        if ($plansResult['success']) {
-            foreach ($plansResult['data'] as $plan) {
-                $availablePlans[$plan['id']] = $plan['name'] . ' (ID: ' . $plan['id'] . ')';
+        // 从WHMCS服务器配置中获取第一个可用的GoEdge服务器配置
+        $serverConfig = getFirstGoEdgeServerConfig();
+
+        if ($serverConfig) {
+            // 构建完整的API端点URL
+            $apiEndpoint = $serverConfig['endpoint'];
+            // 如果IP地址没有包含协议，添加http://
+            if (!preg_match('/^https?:\/\//', $apiEndpoint)) {
+                $apiEndpoint = 'http://' . $apiEndpoint;
             }
+            // 如果没有端口号，添加默认端口9587
+            if (!preg_match('/:\d+/', $apiEndpoint)) {
+                $apiEndpoint .= ':9587';
+            }
+
+            // 解密服务器密码
+            $decryptResult = localAPI('DecryptPassword', array('password2' => $serverConfig['password']));
+            $decryptedPassword = ($decryptResult['result'] == 'success') ? $decryptResult['password'] : $serverConfig['password'];
+
+            $apiParams = array(
+                'serveraccesshash' => $apiEndpoint,
+                'serverusername' => $serverConfig['username'],
+                'serverpassword' => $decryptedPassword
+            );
+
+            $api = new GoEdgeAPI($apiParams);
+            $plansResult = $api->getAvailablePlans();
+            if ($plansResult['success']) {
+                foreach ($plansResult['data'] as $plan) {
+                    $availablePlans[$plan['id']] = $plan['name'] . ' (ID: ' . $plan['id'] . ')';
+                }
+            }
+        } else {
+            // 没有找到服务器配置
+            $availablePlans = array(
+                '' => '请先在WHMCS中配置GoEdge服务器',
+            );
         }
     } catch (Exception $e) {
         // API调用失败时的默认选项
         $availablePlans = array(
-            '' => '请先配置API信息后刷新页面',
+            '' => '无法获取套餐列表: ' . $e->getMessage(),
         );
     }
 
     return array(
         'goedge_plan_id' => array(
-            'FriendlyName' => 'GoEdge 套餐计划ID',
+            'FriendlyName' => 'GoEdge 套餐计划',
             'Type' => 'dropdown',
             'Options' => $availablePlans,
-            'Description' => '选择对应的GoEdge套餐计划。如果列表为空，请先配置API信息。',
-        ),
-        'api_endpoint' => array(
-            'FriendlyName' => 'API 端点',
-            'Type' => 'text',
-            'Size' => '50',
-            'Default' => 'https://api.goedge.cn',
-            'Description' => 'GoEdge API 服务器地址',
-        ),
-        'api_key' => array(
-            'FriendlyName' => 'API 密钥',
-            'Type' => 'password',
-            'Size' => '50',
-            'Description' => 'GoEdge API 访问密钥',
-        ),
-        'api_secret' => array(
-            'FriendlyName' => 'API 密码',
-            'Type' => 'password',
-            'Size' => '50',
-            'Description' => 'GoEdge API 访问密码',
-        ),
-        'auto_suspend' => array(
-            'FriendlyName' => '自动暂停',
-            'Type' => 'yesno',
-            'Description' => '订单暂停时自动暂停 GoEdge CDN账户',
-        ),
-        'debug_mode' => array(
-            'FriendlyName' => '调试模式',
-            'Type' => 'yesno',
-            'Description' => '启用详细日志记录',
+            'Description' => '选择对应的GoEdge套餐计划。API配置请在服务器设置中配置。',
         ),
     );
 }
@@ -118,11 +155,10 @@ function goedge_ConfigOptions()
  */
 function goedge_CreateAccount($params)
 {
-    // 初始化组件
+    // 初始化组件（简化版）
     $logger = new GoEdgeLogger($params);
     $api = new GoEdgeAPI($params);
-    $db = new GoEdgeDatabase();
-    $transaction = new GoEdgeTransaction($api, $db, $logger);
+    $transaction = new GoEdgeTransaction($api, null, $logger); // 不再需要数据库
 
     try {
         // 开始事务
@@ -159,17 +195,7 @@ function goedge_CreateAccount($params)
             // 邮箱不存在，创建新用户
             $logger->log('邮箱不存在，创建新的GoEdge用户', $params['serviceid']);
 
-            // 获取默认集群信息（用于日志记录）
-            $defaultClusterInfo = null;
-            try {
-                $defaultClusterResult = $api->getDefaultClusterId();
-                if ($defaultClusterResult['success']) {
-                    $defaultClusterInfo = $defaultClusterResult['data'];
-                    $logger->log('获取默认集群信息', $params['serviceid'], $defaultClusterInfo);
-                }
-            } catch (Exception $e) {
-                $logger->log('获取默认集群失败，将创建无集群关联的用户', $params['serviceid'], array('error' => $e->getMessage()));
-            }
+            // 简化版本：不获取默认集群信息，减少不必要的API调用
 
             // 准备账户数据
             $accountData = array(
@@ -188,26 +214,17 @@ function goedge_CreateAccount($params)
 
             $goedgeUserId = $result['data']['user_id'];
 
-            // 记录创建结果，包含集群信息
-            $logData = $result;
-            if ($defaultClusterInfo) {
-                $logData['default_cluster'] = $defaultClusterInfo;
-            }
-            $logger->log('GoEdge 新用户创建成功', $params['serviceid'], $logData);
+            // 记录创建结果
+            $logger->log('GoEdge 新用户创建成功', $params['serviceid'], $result);
         }
 
-        // 为用户开通套餐（使用预配置的planid）
+        // 为用户开通套餐（直接从产品配置获取）
         if ($goedgeUserId) {
-            // 首先尝试从数据库绑定关系获取套餐计划ID
-            $goedgePlanId = $db->getPlanIdByProductId($params['pid']);
-
-            // 如果数据库中没有绑定关系，则尝试从产品配置获取
-            if (empty($goedgePlanId)) {
-                $goedgePlanId = $params['configoption1']; // goedge_plan_id
-            }
+            // 直接从产品配置获取套餐计划ID
+            $goedgePlanId = $params['configoption1']; // goedge_plan_id
 
             if (empty($goedgePlanId)) {
-                throw new Exception('未找到GoEdge套餐计划ID绑定关系。请在管理员面板的"套餐计划绑定管理"中配置WHMCS产品与GoEdge套餐计划的绑定关系。');
+                throw new Exception('未配置GoEdge套餐计划ID。请在WHMCS产品配置中设置"GoEdge 套餐计划ID"。');
             }
 
             // 获取产品信息
@@ -262,15 +279,139 @@ function goedge_CreateAccount($params)
     }
 }
 
+/**
+ * 删除账户 - 简化版本，仅记录日志
+ */
+function goedge_TerminateAccount($params)
+{
+    $logger = new GoEdgeLogger($params);
 
+    try {
+        $logger->info("GoEdge账户删除请求", $params['serviceid'], array(
+            'domain' => $params['domain'],
+            'username' => $params['username'],
+            'email' => $params['clientsdetails']['email'],
+            'note' => '删除操作已记录，GoEdge用户保留，可手动管理'
+        ));
 
+        return 'success';
 
+    } catch (Exception $e) {
+        $logger->error("记录删除操作失败", $params['serviceid'], array(
+            'error' => $e->getMessage()
+        ));
+        return $e->getMessage();
+    }
+}
 
+/**
+ * 续费账户 - 延长GoEdge套餐期限
+ */
+function goedge_RenewAccount($params)
+{
+    $logger = new GoEdgeLogger($params);
+    $api = new GoEdgeAPI($params);
 
+    try {
+        $logger->info("开始处理GoEdge服务续费", $params['serviceid'], array(
+            'domain' => $params['domain'],
+            'username' => $params['username'],
+            'next_due_date' => $params['nextduedate']
+        ));
 
+        // 获取用户邮箱
+        $userEmail = $params['clientsdetails']['email'];
 
+        // 查找GoEdge用户
+        $userResult = $api->findUserByEmail($userEmail);
 
-// 简化版本：移除管理员按钮，使用独立的 admin_panel.php 进行管理
+        if (!$userResult['success'] || empty($userResult['data'])) {
+            throw new Exception('未找到对应的GoEdge用户: ' . $userEmail);
+        }
+
+        $user = $userResult['data'][0];
+        $userId = $user['user_id'];
+
+        // 获取套餐计划ID
+        $goedgePlanId = $params['configoption1'];
+        if (empty($goedgePlanId)) {
+            throw new Exception('未配置GoEdge套餐计划ID');
+        }
+
+        // 获取用户的套餐列表，找到对应的套餐
+        $userPlansResult = $api->getUserPlans($userId);
+
+        if (!$userPlansResult['success']) {
+            throw new Exception('获取用户套餐列表失败: ' . $userPlansResult['error']);
+        }
+
+        $targetUserPlan = null;
+        foreach ($userPlansResult['data'] as $userPlan) {
+            if ($userPlan['plan_id'] == $goedgePlanId) {
+                $targetUserPlan = $userPlan;
+                break;
+            }
+        }
+
+        if (!$targetUserPlan) {
+            // 如果没有找到对应套餐，可能需要重新购买
+            $logger->info("未找到对应套餐，尝试重新购买", $params['serviceid'], array(
+                'user_id' => $userId,
+                'plan_id' => $goedgePlanId
+            ));
+
+            // 计算续费期限（从当前时间到下次到期时间的月数）
+            $currentTime = time();
+            $nextDueTime = strtotime($params['nextduedate']);
+            $monthsDiff = max(1, round(($nextDueTime - $currentTime) / (30 * 24 * 3600)));
+
+            // 重新购买套餐
+            $buyResult = $api->buyUserPlan($userId, $goedgePlanId, $monthsDiff);
+
+            if ($buyResult['success']) {
+                $logger->info("GoEdge套餐续费成功（重新购买）", $params['serviceid'], array(
+                    'user_id' => $userId,
+                    'plan_id' => $goedgePlanId,
+                    'months' => $monthsDiff,
+                    'user_plan_id' => $buyResult['data']['user_plan_id']
+                ));
+            } else {
+                throw new Exception('续费失败（重新购买）: ' . $buyResult['error']);
+            }
+        } else {
+            // 如果找到了套餐，使用renewUserPlan API延长期限
+            $logger->info("找到现有套餐，使用API延长期限", $params['serviceid'], array(
+                'user_plan_id' => $targetUserPlan['user_plan_id'],
+                'current_expire' => $targetUserPlan['day_to'],
+                'new_expire_date' => $params['nextduedate']
+            ));
+
+            // 使用renewUserPlan API延长套餐期限
+            $renewResult = $api->renewUserPlan($targetUserPlan['user_plan_id'], array(
+                'expire_date' => $params['nextduedate']
+            ));
+
+            if ($renewResult['success']) {
+                $logger->info("GoEdge套餐续费成功（期限延长）", $params['serviceid'], array(
+                    'user_plan_id' => $targetUserPlan['user_plan_id'],
+                    'old_expire' => $targetUserPlan['day_to'],
+                    'new_expire' => date('Ymd', strtotime($params['nextduedate']))
+                ));
+            } else {
+                throw new Exception('续费失败（期限延长）: ' . $renewResult['error']);
+            }
+        }
+
+        return 'success';
+
+    } catch (Exception $e) {
+        $logger->error("GoEdge服务续费失败", $params['serviceid'], array(
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ));
+        return $e->getMessage();
+    }
+}
 
 /**
  * 客户区域功能
@@ -282,7 +423,3 @@ function goedge_ClientAreaCustomButtonArray()
         '进入控制面板' => 'controlPanel',
     );
 }
-
-
-
-

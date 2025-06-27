@@ -127,37 +127,8 @@ add_hook('ClientAreaPageProductDetails', 1, function($vars) {
     return array();
 });
 
-/**
- * 管理员区域添加GoEdge管理链接
- */
-add_hook('AdminAreaPage', 1, function($vars) {
-    if ($vars['filename'] == 'clientsservices' && isset($_GET['id'])) {
-        $serviceId = $_GET['id'];
-
-        try {
-            // 检查是否为GoEdge服务
-            $result = localAPI('GetClientsProducts', array(
-                'serviceid' => $serviceId,
-                'stats' => false
-            ));
-
-            if ($result['result'] == 'success' &&
-                isset($result['products']['product'][0]) &&
-                $result['products']['product'][0]['servertype'] == 'goedge') {
-
-                // 简化版本：只提供管理链接，不需要本地账户信息
-                return array(
-                    'goedge_admin_url' => 'admin_panel.php'
-                );
-            }
-        } catch (Exception $e) {
-            $logger = new GoEdgeLogger();
-            $logger->error("处理管理员页面钩子异常", $serviceId, array('error' => $e->getMessage()));
-        }
-    }
-
-    return array();
-});
+// 简化版：移除了管理员面板相关钩子
+// 所有配置都通过WHMCS标准产品配置管理
 
 /**
  * 定期同步账户状态（通过cron任务调用）

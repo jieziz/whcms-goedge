@@ -27,9 +27,8 @@
 - **操作审计**: 关键操作的完整日志记录
 
 ### ⚙️ 管理功能
-- **套餐绑定配置**: 专注核心配置任务的管理界面
-- **API连接管理**: 统一使用WHMCS产品配置中的API参数
-- **绑定关系管理**: 直观管理WHMCS产品与GoEdge套餐的对应关系
+- **产品配置管理**: 直接在WHMCS产品配置中设置GoEdge套餐计划ID
+- **API连接管理**: 统一使用WHMCS服务器配置中的API参数
 - **日志监控**: 详细的操作日志和错误追踪
 
 ### 👥 客户体验
@@ -71,8 +70,8 @@ chmod 755 /path/to/whmcs/modules/servers/goedge/
 chmod 644 /path/to/whmcs/modules/servers/goedge/*.php
 ```
 
-### 2. 数据库初始化
-插件会在首次使用时自动创建必要的数据表（仅一个核心表），无需手动执行安装脚本。
+### 2. 模块配置
+插件采用极简设计，无需数据库初始化，所有配置通过WHMCS标准产品配置管理。
 
 ### 3. 创建GoEdge AccessKey
 在配置WHMCS之前，您需要在GoEdge管理平台创建API AccessKey：
@@ -146,39 +145,41 @@ chmod 644 /path/to/whmcs/modules/servers/goedge/*.php
 whmcs-goedge/
 ├── lib/
 │   ├── GoEdgeAPI.php            # GoEdge API接口类（已优化，移除无用代码）
-│   ├── GoEdgeDatabase.php       # 数据库操作类（极简设计）
+│   ├── GoEdgeDatabase.php       # 数据库操作类（极简设计，无数据表）
 │   ├── GoEdgeLogger.php         # 日志记录类（文件日志）
 │   ├── GoEdgeTransaction.php    # 事务处理类（回滚保护）
 │   └── GoEdgeUserHelper.php     # 用户辅助类
-├── admin_panel.php              # 安全管理面板（WHMCS管理员验证）
 ├── test_createuser_api.php      # 用户创建API测试脚本
 ├── test_userplanservice_api.php # 用户套餐API测试脚本
 ├── test_index.php               # 测试中心入口
 ├── clientarea.php               # 客户端控制面板页面
 ├── goedge.php                   # 主插件文件
 ├── hooks.php                    # WHMCS钩子函数
-├── install.php                  # 安装脚本
 ├── LICENSE                      # 许可证文件
 └── README.md                    # 说明文档
 ```
 
 ## 🗄️ 数据库结构
 
-插件采用极简数据库设计，仅创建一个核心数据表：
+插件采用极简数据库设计，无需创建任何数据表：
 
-### 核心数据表
+### 配置存储方式
+- **服务器配置**: 存储在WHMCS标准的 `tblservers` 表中
+- **套餐绑定**: 直接在WHMCS产品配置中设置
+- **无额外数据表**: 完全依赖WHMCS原生数据结构
 
-#### `mod_goedge_plan_bindings` - 套餐绑定表
-存储WHMCS产品与GoEdge套餐计划的绑定关系
-```sql
-- id: 主键
-- product_id: WHMCS产品ID（唯一）
-- product_name: WHMCS产品名称
-- plan_id: GoEdge套餐计划ID
-- plan_name: GoEdge套餐计划名称
-- status: 绑定状态（active/disabled）
-- created_at/updated_at: 时间戳
-```
+### 配置方式
+
+**1. 服务器配置（在WHMCS管理后台）:**
+- 进入：系统设置 → 产品/服务 → 服务器
+- 添加新服务器，类型选择 `GoEdge CDN`
+- 服务器IP地址：GoEdge API端点（如：`http://91.229.202.41:9587`）
+- 用户名：GoEdge AccessKeyId
+- 密码：GoEdge AccessKey
+
+**2. 产品配置（在产品设置页面）:**
+- 在产品的"模块设置"中选择 `GoEdge CDN`
+- 在"GoEdge 套餐计划ID"字段中输入对应的套餐ID
 
 ## 🧪 API测试工具
 
@@ -250,7 +251,7 @@ php test_userplanservice_api.php
 - 确认WHMCS产品已正确配置服务器组
 - 检查服务器组中的API配置信息
 - 验证GoEdge API返回的套餐数据格式
-- 查看 `mod_goedge_plan_bindings` 表中的绑定记录
+- 检查WHMCS产品配置中的套餐计划ID设置
 
 #### 5. 事务回滚问题
 **症状**: 账户创建过程中出现部分成功、部分失败的情况
@@ -275,15 +276,15 @@ php test_userplanservice_api.php
 
 ### 数据库维护
 
-#### 检查数据一致性
+#### 检查配置一致性
 ```sql
--- 检查未绑定的产品
-SELECT pid, name FROM tblproducts
-WHERE servertype = 'goedge'
-AND pid NOT IN (SELECT product_id FROM mod_goedge_plan_bindings);
+-- 检查GoEdge产品配置
+SELECT p.id, p.name, p.configoption1 as goedge_plan_id
+FROM tblproducts p
+WHERE p.servertype = 'goedge';
 
--- 检查绑定关系状态
-SELECT * FROM mod_goedge_plan_bindings WHERE status = 'disabled';
+-- 检查服务器配置
+SELECT * FROM tblservers WHERE type = 'goedge' AND disabled = 0;
 ```
 
 #### 日志文件维护

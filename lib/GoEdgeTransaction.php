@@ -19,7 +19,7 @@ class GoEdgeTransaction
     public function __construct($api, $db, $logger)
     {
         $this->api = $api;
-        $this->db = $db;
+        $this->db = $db; // 可以为null（简化版不需要数据库）
         $this->logger = $logger;
     }
     
